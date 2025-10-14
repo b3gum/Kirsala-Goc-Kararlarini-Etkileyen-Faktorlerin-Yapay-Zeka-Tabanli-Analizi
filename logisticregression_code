@@ -1,0 +1,81 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+pd.set_option("display.max_colwidth",200)
+pd.set_option("display.max_columns",200)
+path = ("/Yaşanılabilir Bir Kent İçin Önem Sıralaması (1).xlsx")
+df = pd.read_excel(path, sheet_name="Form Yanıtları 1")
+df.columns = [c.strip().replace("","").replace("\n","").strip()for c in df.columns]
+target_col = "Göç Etmemeyi Tercih Eder"
+feature_cols = [
+     "Ulaşım",
+    "Güvenlik",
+    "İklim Değişikliğine Duyarlı",
+    "Kadınların Sosyalleşebileceği Alanlar",
+    "Kendine Özgü Kent Dokusu",
+    "İyi Belediyecilik",
+    "Sağlık",
+    "Sosyal Alanlar",  # sondaki boşluğu temizledik, adı böyle kaldı
+    "Yeşil Alanlar",
+    "Altyapı",
+    "Erişilebilirlik",
+    "Afetlere Karşı Direnç",
+    "Ekonomi",
+    "Dengeli Şehirleşme (Kır Kent Arasındaki Nüfus Dengesi)",
+    "Fazla Nüfuslu Şehir",
+    "Göç Alan Şehir (Dış ülkelerden daha çok göç alan)",
+    "Göç Alan Şehir ( ülke içinden göç alan)",
+    "Kültürel Miras Alanlarının Varlığı",
+    "Çevre Kirliliğinin Olmaması",
+    "Eğitim",
+]
+missing = [c for c in feature_cols if c not in df.columns]
+print (" bulunamayan sütunlar:",missing)
+x = df[feature_cols].copy()
+x = x.apply(pd.to_numeric,errors='coerce')
+x = x.fillna(x.median(numeric_only=True))
+y = df[target_col].astype(int)
+
+x_train, x_test, y_train, y_test = train_test_split(x,y,test_size=0.25, random_state=42,stratify=y)
+scaler = StandardScaler()
+x_train_s =scaler.fit_transform(x_train)
+x_test_s = scaler.transform(x_test)
+logreg =LogisticRegression(max_iter=500,class_weight='balanced',random_state=42)
+logreg.fit(x_train_s,y_train)
+y_pred =logreg.predict(x_test_s)
+print ("Doğruluk:",round(accuracy_score(y_test, y_pred),3))
+print ("\n Sınıflandırma Raporu:\n",classification_report(y_test, y_pred, digits=3))
+print ("\n Karmaşıklık Matrisi:\n",confusion_matrix(y_test, y_pred))
+skf = StratifiedKFold(n_splits=5, shuffle=True,random_state=42)
+cv_scores = cross_val_score(
+    LogisticRegression(max_iter=500,class_weight='balanced', random_state=42),
+    StandardScaler().fit_transform(x),
+    y,cv=skf,scoring="accuracy"
+)
+print ("\n5-fold cv accuracy -> Ort:",round(cv_scores.mean(),3)," | Std:", round(cv_scores.std(),3))
+coefs = pd.DataFrame({
+    "Faktör":feature_cols,
+    "Katsayı (beta)": logreg.coef_[0],
+})
+coefs [ "Odds Ratio (exp(beta))"] = np.exp (coefs ["Katsayı (beta)"])
+coefs [ "Yorum"] = np.where (
+    coefs ["Katsayı (beta)"] > 0,
+    "Puan ↑ → KIRSALA GÖÇ ETMEME olasılığı ↑ (şehirde kalma ↑)",
+    "Puan ↑ → KIRSALA GÖÇ ETME olasılığı ↑"
+)
+coefs_sorted = coefs.reindex (coefs["Katsayı (beta)"].abs().sort_values(ascending=False).index).reset_index(drop=True)
+import matplotlib.pyplot as plt
+
+topN = 12
+plot_df = coefs_sorted.head(topN).sort_values("Katsayı (beta)")
+
+plt.figure(figsize=(8,5))
+plt.barh(plot_df["Faktör"], plot_df["Katsayı (beta)"])
+plt.title(f"Lojistik Regresyon — En Etkili {topN} Faktör (beta)")
+plt.xlabel("Katsayı (beta)")
+plt.tight_layout()
+plt.show()
